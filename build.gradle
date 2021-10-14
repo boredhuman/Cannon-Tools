@@ -44,3 +44,13 @@ processResources
         exclude 'mcmod.info'
     }
 }
+
+jar {
+    manifest.attributes(
+            "ModuleName" : "Cannon Tools",
+            "Author" : "BoredHuman",
+            "Description" : "Tools to help cannon development.",
+            "Image" : "",
+            "Version" : "1.0"
+    )
+}
