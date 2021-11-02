@@ -31,6 +31,7 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -121,7 +122,7 @@ public class CannonToolsMod extends AbstractModule {
 	private MutableValue<Float> cubeThickness = new MutableValue<>(0.25F);
 
 	// position x, z and insert time, explosions
-	private LinkedHashMap<Pair<Integer, Integer>, Pair<Long, List<Position>>> wallColumn = new LinkedHashMap<>();
+	private Map<Pair<Integer, Integer>, Pair<Long, Pair<List<Position>, Set<Integer>>>> wallColumn = Collections.synchronizedMap(new LinkedHashMap<>());
 
 	private Map<Position, MiniChunk> dispenserCache = new HashMap<>();
 
@@ -213,12 +214,14 @@ public class CannonToolsMod extends AbstractModule {
 				continue;
 			}
 
-			Pair<Long, List<Position>> wallColumn = this.wallColumn.computeIfAbsent(Pair.of((int) entity.posX, (int) entity.posZ), pair -> {
-				return Pair.of(now, new ArrayList<>());
+			Pair<Long, Pair<List<Position>, Set<Integer>>> wallColumn = this.wallColumn.computeIfAbsent(Pair.of((int) entity.posX, (int) entity.posZ), pair -> {
+				return Pair.of(now, Pair.of(new ArrayList<>(), new HashSet<>()));
 			});
-			wallColumn.second.add(position);
 
 			int id = entity.getEntityId();
+			if (wallColumn.second.second.add(id)) {
+				wallColumn.second.first.add(position);
+			}
 			Pair<LinkedList<Long>, LinkedList<Position>> listLinkedListPair;
 			if (entity instanceof EntityTNTPrimed) {
 				listLinkedListPair = this.TNTLines.computeIfAbsent(id, k -> new Pair<>(new LinkedList<>(), new LinkedList<>()));
@@ -265,10 +268,14 @@ public class CannonToolsMod extends AbstractModule {
 
 	public void cleanupColumns() {
 		long now = System.currentTimeMillis();
-		for (Map.Entry<Pair<Integer, Integer>, Pair<Long, List<Position>>> mapEntry : this.wallColumn.entrySet()) {
+		List<Pair<Integer, Integer>> toRemove = new ArrayList<>();
+		for (Map.Entry<Pair<Integer, Integer>, Pair<Long, Pair<List<Position>, Set<Integer>>>> mapEntry : this.wallColumn.entrySet()) {
 			if (mapEntry.getValue().first + 10000 < now) {
-				this.wallColumn.remove(mapEntry.getKey());
+				toRemove.add(mapEntry.getKey());
 			}
+		}
+		for (Pair<Integer, Integer> key : toRemove) {
+			this.wallColumn.remove(key);
 		}
 	}
 
@@ -312,16 +319,39 @@ public class CannonToolsMod extends AbstractModule {
 		}
 	}
 
+	int biggestColumnSize = 0;
+	long biggestColumnSizeTime = 0;
+
 	public void doPatchCrumbs(BatchedLineRenderingEvent event) {
 		if (this.wallColumn.isEmpty()) {
 			return;
 		}
-		Pair<Integer, Integer>[] mostRecentColumn = this.wallColumn.keySet().toArray(new Pair[0]);
-		Pair<Long, List<Position>> columnPositions = this.wallColumn.get(mostRecentColumn[mostRecentColumn.length - 1]);
-		if (columnPositions == null) {
+
+		long now = System.currentTimeMillis();
+		if (now - this.biggestColumnSizeTime > 30000) {
+			this.biggestColumnSize = 0;
+		}
+
+		Pair<List<Position>, Set<Integer>> column = null;
+		for (Pair<Long, Pair<List<Position>, Set<Integer>>> value : this.wallColumn.values()) {
+			if (this.biggestColumnSize < value.second.second.size()) {
+				this.biggestColumnSize = value.second.second.size();
+				this.biggestColumnSizeTime = now;
+			}
+			if (column == null) {
+				column = value.second;
+				continue;
+			}
+			if (column.second.size() < value.second.second.size()) {
+				column = value.second;
+			}
+		}
+
+		if (column == null || column.second.size() < this.biggestColumnSize * 0.25) {
 			return;
 		}
-		Position patchPosition = columnPositions.second.get(0);
+
+		Position patchPosition = column.first.get(0);
 
 		if (patchPosition.y == -1) {
 			return;
