@@ -21,6 +21,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.item.EntityFallingBlock;
 import net.minecraft.entity.item.EntityTNTPrimed;
 import net.minecraft.network.play.server.S27PacketExplosion;
+import net.minecraft.util.MathHelper;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.client.registry.RenderingRegistry;
 import net.minecraftforge.fml.common.Mod;
@@ -30,7 +31,9 @@ import net.minecraftforge.fml.common.gameevent.TickEvent;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -117,6 +120,11 @@ public class CannonToolsMod extends AbstractModule {
 	@ConfigMinMax(min = 0.1F, max = 0.5F)
 	private MutableValue<Float> cubeThickness = new MutableValue<>(0.25F);
 
+	// position x, z and insert time, explosions
+	private LinkedHashMap<Pair<Integer, Integer>, Pair<Long, List<Position>>> wallColumn = new LinkedHashMap<>();
+
+	private Map<Position, MiniChunk> dispenserCache = new HashMap<>();
+
 	RenderHook renderHook = phase -> {
 		if (!this.doDepth.getValue()) {
 			if (phase == RenderHook.Phase.SETUP) {
@@ -157,14 +165,15 @@ public class CannonToolsMod extends AbstractModule {
 		this.cleanUp(this.TNTLines);
 		this.cleanUp(this.fallingBlockLines);
 		this.cleanUpBoxes();
+		this.cleanupColumns();
 		long now = System.currentTimeMillis();
 		for (Entity entity : mc.theWorld.loadedEntityList) {
-			Position position = new Position(entity.posX, entity.posY, entity.posZ);
 			boolean isTNT = entity instanceof EntityTNTPrimed;
 			boolean isSand = entity instanceof EntityFallingBlock;
 			if (!isSand && !isTNT) {
 				continue;
 			}
+			Position position = new Position(entity.posX, entity.posY + 0.49, entity.posZ);
 			if (isTNT && this.minimalTNT.getValue()) {
 				EntityTNTPrimed tnt = (EntityTNTPrimed) entity;
 				Pair<Position, Integer> positionFusePair = new Pair<>(position, tnt.fuse);
@@ -186,6 +195,29 @@ public class CannonToolsMod extends AbstractModule {
 			if ((!gatherTNTLines && !gatherSandLines && !this.patchCrumbs.getValue())) {
 				continue;
 			}
+
+			int cX = MathHelper.floor_double(entity.posX / 4.0D);
+			int cZ = MathHelper.floor_double(entity.posZ / 4.0D);
+			Position miniChunkPosition = new Position(cX, 0, cZ);
+			MiniChunk miniChunk = this.dispenserCache.computeIfAbsent(miniChunkPosition, pos -> new MiniChunk(cX, cZ));
+			Position cXP = new Position(cX + 1, 0, cZ);
+			MiniChunk mc2 = this.dispenserCache.computeIfAbsent(cXP, pos -> new MiniChunk(cX + 1, cZ));
+			Position cXN = new Position(cX - 1, 0, cZ);
+			MiniChunk mc3 = this.dispenserCache.computeIfAbsent(cXN, pos -> new MiniChunk(cX - 1, cZ));
+			Position cZP = new Position(cX, 0, cZ + 1);
+			MiniChunk mc4 = this.dispenserCache.computeIfAbsent(cZP, pos -> new MiniChunk(cX, cZ + 1));
+			Position cZN = new Position(cX, 0, cZ - 1);
+			MiniChunk mc5 = this.dispenserCache.computeIfAbsent(cZN, pos -> new MiniChunk(cX, cZ - 1));
+
+			if (miniChunk.containsDispensers(now) || mc2.containsDispensers(now) || mc3.containsDispensers(now) || mc4.containsDispensers(now) || mc5.containsDispensers(now)) {
+				continue;
+			}
+
+			Pair<Long, List<Position>> wallColumn = this.wallColumn.computeIfAbsent(Pair.of((int) entity.posX, (int) entity.posZ), pair -> {
+				return Pair.of(now, new ArrayList<>());
+			});
+			wallColumn.second.add(position);
+
 			int id = entity.getEntityId();
 			Pair<LinkedList<Long>, LinkedList<Position>> listLinkedListPair;
 			if (entity instanceof EntityTNTPrimed) {
@@ -231,6 +263,15 @@ public class CannonToolsMod extends AbstractModule {
 		this.tntPositionTime.entrySet().removeIf(positionLongEntry -> positionLongEntry.getValue() + clearTime < now);
 	}
 
+	public void cleanupColumns() {
+		long now = System.currentTimeMillis();
+		for (Map.Entry<Pair<Integer, Integer>, Pair<Long, List<Position>>> mapEntry : this.wallColumn.entrySet()) {
+			if (mapEntry.getValue().first + 10000 < now) {
+				this.wallColumn.remove(mapEntry.getKey());
+			}
+		}
+	}
+
 	@SubscribeEvent
 	public void batchedLineStripEvent(BatchedLineRenderingEvent event) {
 		if (this.showTNTCrumbs.getValue()) {
@@ -272,42 +313,24 @@ public class CannonToolsMod extends AbstractModule {
 	}
 
 	public void doPatchCrumbs(BatchedLineRenderingEvent event) {
-		List<Position> candidates = new ArrayList<>();
-		for (Map.Entry<Integer, Pair<LinkedList<Long>, LinkedList<Position>>> entry : this.TNTLines.entrySet().toArray(new Map.Entry[0])) {
-			LinkedList<Position> lines = entry.getValue().second;
-			Position prevPosition = null;
-			for (Position line : lines) {
-				if (prevPosition == null) {
-					prevPosition = line;
-				}
-				if (prevPosition.y > line.y) {
-					break;
-				}
-				if (!prevPosition.equals(line)) {
-					candidates.add(line);
-					break;
-				}
-			}
+		if (this.wallColumn.isEmpty()) {
+			return;
 		}
-
-		Position highestPosition = null;
-		for (Position pos : candidates) {
-			if (highestPosition == null) {
-				highestPosition = pos;
-			}
-			if (pos.y > highestPosition.y) {
-				highestPosition = pos;
-			}
+		Pair<Integer, Integer>[] mostRecentColumn = this.wallColumn.keySet().toArray(new Pair[0]);
+		Pair<Long, List<Position>> columnPositions = this.wallColumn.get(mostRecentColumn[mostRecentColumn.length - 1]);
+		if (columnPositions == null) {
+			return;
 		}
+		Position patchPosition = columnPositions.second.get(0);
 
-		if (highestPosition == null) {
+		if (patchPosition.y == -1) {
 			return;
 		}
 
 		float rad = this.cubeThickness.getValue();
 
-		Box patchXBox = new Box(highestPosition.x - 100, highestPosition.y - rad, highestPosition.z - rad, highestPosition.x + 100, highestPosition.y + rad, highestPosition.z + rad);
-		Box patchZBox = new Box(highestPosition.x - rad, highestPosition.y - rad, highestPosition.z - 100, highestPosition.x + rad, highestPosition.y + rad, highestPosition.z + 100);
+		Box patchXBox = new Box(patchPosition.x - 100, patchPosition.y - rad, patchPosition.z - rad, patchPosition.x + 100, patchPosition.y + rad, patchPosition.z + rad);
+		Box patchZBox = new Box(patchPosition.x - rad, patchPosition.y - rad, patchPosition.z - 100, patchPosition.x + rad, patchPosition.y + rad, patchPosition.z + 100);
 
 		List<Pair<Position, Position>> boxOutlines = new ArrayList<>();
 		boxOutlines.addAll(this.makeOutline(patchXBox.minX, patchXBox.minY, patchXBox.minZ, patchXBox.maxX, patchXBox.maxY, patchXBox.maxZ));
