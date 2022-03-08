@@ -26,7 +26,7 @@ minecraft {
 }
 
 dependencies {
-    compile files("C:\\Users\\danie\\IdeaProjects\\BHCore\\build\\libs\\owcore.jar");
+    compile files("C:\\Users\\danie\\IdeaProjects\\BHCore\\build\\libs\\dancore-all.jar");
 }
 
 processResources
@@ -51,6 +51,6 @@ jar {
             "Author" : "BoredHuman",
             "Description" : "Tools to help cannon development.",
             "Image" : "",
-            "Version" : "1.0"
+            "Version" : "1.03"
     )
 }

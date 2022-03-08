@@ -1,6 +1,6 @@
 package dev.boredhuman.cannontools;
 
-import dev.boredhuman.api.BHCoreAPI;
+import dev.boredhuman.api.DanCoreAPI;
 import dev.boredhuman.api.config.CategoryStart;
 import dev.boredhuman.api.config.ConfigMinMax;
 import dev.boredhuman.api.config.ConfigProperty;
@@ -87,6 +87,9 @@ public class CannonToolsMod extends AbstractModule {
 	@ConfigProperty(name = "TNT Triangle Lines")
 	private MutableValue<Boolean> tntTriangles = new MutableValue<>(false);
 
+	@ConfigProperty(name = "Avoid Cannon")
+	private MutableValue<Boolean> avoidCannonTNT = new MutableValue<>(false);
+
 	@CategoryStart(name = "Sand Settings")
 	@ConfigProperty(name = "Sand Breadcrumbs")
 	private MutableValue<Boolean> showSandCrumbs = new MutableValue<>(true);
@@ -99,6 +102,9 @@ public class CannonToolsMod extends AbstractModule {
 
 	@ConfigProperty(name = "Sand Triangle Lines")
 	private MutableValue<Boolean> sandTriangles = new MutableValue<>(false);
+
+	@ConfigProperty(name = "Avoid Cannon")
+	private MutableValue<Boolean> avoidCannonSand = new MutableValue<>(false);
 
 	@CategoryStart(name = "Rendering Settings")
 	@ConfigProperty(name = "TNT Flashing")
@@ -116,6 +122,10 @@ public class CannonToolsMod extends AbstractModule {
 
 	@ConfigProperty(name = "Patch Color")
 	private ModColor patchColor = new ModColor(0xFF00FF00);
+
+	@ConfigProperty(name = "Clear Time /s")
+	@ConfigMinMax(min = 1, max = 10)
+	private MutableValue<Float> clearTimePatch = new MutableValue<>(3F);
 
 	@ConfigProperty(name = "Cube Thickness")
 	@ConfigMinMax(min = 0.1F, max = 0.5F)
@@ -146,13 +156,18 @@ public class CannonToolsMod extends AbstractModule {
 	@Override
 	public void init() {
 		CannonToolsMod.INSTANCE = this;
-		BHCoreAPI.getAPI().registerModules(this);
+		DanCoreAPI.getAPI().registerModules(this);
 		RenderingRegistry.registerEntityRenderingHandler(EntityTNTPrimed.class, new TNTRenderer(Minecraft.getMinecraft().getRenderManager()));
 		MinecraftForge.EVENT_BUS.register(this);
 	}
 
 	@SubscribeEvent
 	public void onTick(TickEvent.ClientTickEvent event) {
+		this.cleanUp(this.TNTLines);
+		this.cleanUp(this.fallingBlockLines);
+		this.cleanUpBoxes();
+		this.cleanupColumns();
+
 		if (!this.enabled.getValue()) {
 			return;
 		}
@@ -163,10 +178,6 @@ public class CannonToolsMod extends AbstractModule {
 		if (mc.theWorld == null) {
 			return;
 		}
-		this.cleanUp(this.TNTLines);
-		this.cleanUp(this.fallingBlockLines);
-		this.cleanUpBoxes();
-		this.cleanupColumns();
 		long now = System.currentTimeMillis();
 		for (Entity entity : mc.theWorld.loadedEntityList) {
 			boolean isTNT = entity instanceof EntityTNTPrimed;
@@ -197,31 +208,41 @@ public class CannonToolsMod extends AbstractModule {
 				continue;
 			}
 
-			int cX = MathHelper.floor_double(entity.posX / 4.0D);
-			int cZ = MathHelper.floor_double(entity.posZ / 4.0D);
-			Position miniChunkPosition = new Position(cX, 0, cZ);
-			MiniChunk miniChunk = this.dispenserCache.computeIfAbsent(miniChunkPosition, pos -> new MiniChunk(cX, cZ));
-			Position cXP = new Position(cX + 1, 0, cZ);
-			MiniChunk mc2 = this.dispenserCache.computeIfAbsent(cXP, pos -> new MiniChunk(cX + 1, cZ));
-			Position cXN = new Position(cX - 1, 0, cZ);
-			MiniChunk mc3 = this.dispenserCache.computeIfAbsent(cXN, pos -> new MiniChunk(cX - 1, cZ));
-			Position cZP = new Position(cX, 0, cZ + 1);
-			MiniChunk mc4 = this.dispenserCache.computeIfAbsent(cZP, pos -> new MiniChunk(cX, cZ + 1));
-			Position cZN = new Position(cX, 0, cZ - 1);
-			MiniChunk mc5 = this.dispenserCache.computeIfAbsent(cZN, pos -> new MiniChunk(cX, cZ - 1));
+			boolean checkInDispenserRegion = (isTNT && this.avoidCannonTNT.getValue()) || (isSand && this.avoidCannonSand.getValue()) || (isTNT && this.patchCrumbs.getValue());
 
-			if (miniChunk.containsDispensers(now) || mc2.containsDispensers(now) || mc3.containsDispensers(now) || mc4.containsDispensers(now) || mc5.containsDispensers(now)) {
+			boolean inDispenserRegion = false;
+
+			if (checkInDispenserRegion) {
+				int cX = MathHelper.floor_double(entity.posX / 4.0D);
+				int cZ = MathHelper.floor_double(entity.posZ / 4.0D);
+				Position miniChunkPosition = new Position(cX, 0, cZ);
+				MiniChunk miniChunk = this.dispenserCache.computeIfAbsent(miniChunkPosition, pos -> new MiniChunk(cX, cZ));
+				Position cXP = new Position(cX + 1, 0, cZ);
+				MiniChunk mc2 = this.dispenserCache.computeIfAbsent(cXP, pos -> new MiniChunk(cX + 1, cZ));
+				Position cXN = new Position(cX - 1, 0, cZ);
+				MiniChunk mc3 = this.dispenserCache.computeIfAbsent(cXN, pos -> new MiniChunk(cX - 1, cZ));
+				Position cZP = new Position(cX, 0, cZ + 1);
+				MiniChunk mc4 = this.dispenserCache.computeIfAbsent(cZP, pos -> new MiniChunk(cX, cZ + 1));
+				Position cZN = new Position(cX, 0, cZ - 1);
+				MiniChunk mc5 = this.dispenserCache.computeIfAbsent(cZN, pos -> new MiniChunk(cX, cZ - 1));
+
+				inDispenserRegion = miniChunk.containsDispensers(now) || mc2.containsDispensers(now) || mc3.containsDispensers(now) || mc4.containsDispensers(now) || mc5.containsDispensers(now);
+			}
+
+			int id = entity.getEntityId();
+
+			if (this.patchCrumbs.getValue() && !inDispenserRegion && checkInDispenserRegion) {
+				Pair<Long, Pair<List<Position>, Set<Integer>>> wallColumn = this.wallColumn.computeIfAbsent(Pair.of((int) entity.posX, (int) entity.posZ), pair -> Pair.of(now, Pair.of(new ArrayList<>(), new HashSet<>())));
+
+				if (wallColumn.second.second.add(id)) {
+					wallColumn.second.first.add(position);
+				}
+			}
+
+			if (inDispenserRegion && ((isTNT && this.avoidCannonTNT.getValue()) || (isSand && this.avoidCannonSand.getValue()))) {
 				continue;
 			}
 
-			Pair<Long, Pair<List<Position>, Set<Integer>>> wallColumn = this.wallColumn.computeIfAbsent(Pair.of((int) entity.posX, (int) entity.posZ), pair -> {
-				return Pair.of(now, Pair.of(new ArrayList<>(), new HashSet<>()));
-			});
-
-			int id = entity.getEntityId();
-			if (wallColumn.second.second.add(id)) {
-				wallColumn.second.first.add(position);
-			}
 			Pair<LinkedList<Long>, LinkedList<Position>> listLinkedListPair;
 			if (entity instanceof EntityTNTPrimed) {
 				listLinkedListPair = this.TNTLines.computeIfAbsent(id, k -> new Pair<>(new LinkedList<>(), new LinkedList<>()));
@@ -269,11 +290,13 @@ public class CannonToolsMod extends AbstractModule {
 	public void cleanupColumns() {
 		long now = System.currentTimeMillis();
 		List<Pair<Integer, Integer>> toRemove = new ArrayList<>();
+
 		for (Map.Entry<Pair<Integer, Integer>, Pair<Long, Pair<List<Position>, Set<Integer>>>> mapEntry : this.wallColumn.entrySet()) {
-			if (mapEntry.getValue().first + 10000 < now) {
+			if (mapEntry.getValue().first + (this.clearTimePatch.getValue() * 1000) < now) {
 				toRemove.add(mapEntry.getKey());
 			}
 		}
+
 		for (Pair<Integer, Integer> key : toRemove) {
 			this.wallColumn.remove(key);
 		}
@@ -281,6 +304,9 @@ public class CannonToolsMod extends AbstractModule {
 
 	@SubscribeEvent
 	public void batchedLineStripEvent(BatchedLineRenderingEvent event) {
+		if (!this.isEnabled().getValue()) {
+			return;
+		}
 		if (this.showTNTCrumbs.getValue()) {
 			for (Pair<LinkedList<Long>, LinkedList<Position>> toDraw : this.TNTLines.values()) {
 				event.addLineStripLineWidth(Pair.of(this.lineWidth.getValue(), this.renderHook), new BatchedLineRenderingEvent.LineStrip(toDraw.second, this.tntLineColor.getBGRA()));
@@ -309,6 +335,9 @@ public class CannonToolsMod extends AbstractModule {
 
 	@SubscribeEvent
 	public void onPacket(PacketEvent event) {
+		if (!this.isEnabled().getValue()) {
+			return;
+		}
 		if (!this.explosionBox.getValue()) {
 			return;
 		}
@@ -319,35 +348,32 @@ public class CannonToolsMod extends AbstractModule {
 		}
 	}
 
-	int biggestColumnSize = 0;
-	long biggestColumnSizeTime = 0;
-
 	public void doPatchCrumbs(BatchedLineRenderingEvent event) {
 		if (this.wallColumn.isEmpty()) {
 			return;
 		}
 
-		long now = System.currentTimeMillis();
-		if (now - this.biggestColumnSizeTime > 30000) {
-			this.biggestColumnSize = 0;
-		}
-
 		Pair<List<Position>, Set<Integer>> column = null;
-		for (Pair<Long, Pair<List<Position>, Set<Integer>>> value : this.wallColumn.values()) {
-			if (this.biggestColumnSize < value.second.second.size()) {
-				this.biggestColumnSize = value.second.second.size();
-				this.biggestColumnSizeTime = now;
-			}
-			if (column == null) {
-				column = value.second;
-				continue;
-			}
-			if (column.second.size() < value.second.second.size()) {
-				column = value.second;
+
+		List<Pair<Long, Pair<List<Position>, Set<Integer>>>> values = Arrays.asList(this.wallColumn.values().toArray(new Pair[0]));
+
+		int totalTNT = 0;
+		int count = 0;
+
+		for (Pair<Long, Pair<List<Position>, Set<Integer>>> value : values) {
+			totalTNT += value.second.second.size();
+			count++;
+		}
+
+		int average = totalTNT / count;
+
+		for (int i = values.size() - 1; i > -1; i--) {
+			if (values.get(i).second.second.size() > average / 2) {
+				column = values.get(i).second;
 			}
 		}
 
-		if (column == null || column.second.size() < this.biggestColumnSize * 0.25) {
+		if (column == null) {
 			return;
 		}
 
@@ -369,7 +395,7 @@ public class CannonToolsMod extends AbstractModule {
 		event.addLineLineWidth(Pair.of(this.boxLineWidth.getValue(), this.renderHook), new BatchedLineRenderingEvent.Line(boxOutlines, this.patchColor.getBGRA()));
 
 		int color = this.patchColor.getBGRA();
-		event.addBoxesColor(color, Arrays.asList(new Box[]{patchXBox, patchZBox}), null);
+		event.addBoxesColor(color, Arrays.asList(new Box[]{patchXBox, patchZBox}), this.renderHook);
 	}
 
 	public List<Pair<Position, Position>> makeOutline(Position position, double radius) {
