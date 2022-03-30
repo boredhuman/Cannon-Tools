@@ -124,7 +124,7 @@ public class CannonToolsMod extends AbstractModule {
 	private ModColor patchColor = new ModColor(0xFF00FF00);
 
 	@ConfigProperty(name = "Clear Time /s")
-	@ConfigMinMax(min = 1, max = 10)
+	@ConfigMinMax(min = 1, max = 120)
 	private MutableValue<Float> clearTimePatch = new MutableValue<>(3F);
 
 	@ConfigProperty(name = "Cube Thickness")
@@ -162,6 +162,45 @@ public class CannonToolsMod extends AbstractModule {
 	}
 
 	@SubscribeEvent
+	public void onEntityJoin(EntityJoinWorldEvent e) {
+		if (!this.isEnabled().getValue() || !this.patchCrumbs.getValue()) {
+			return;
+		}
+		if (e.entity instanceof EntityTNTPrimed || e.entity instanceof EntityFallingBlock) {
+			if (!inDispenserRegion(e.entity, this.now)) {
+				Entity entity = e.entity;
+				int id = entity.getEntityId();
+				Position position = new Position(entity.posX, entity.posY + 0.49, entity.posZ);
+				Pair<Long, Pair<List<Position>, Set<Integer>>> wallColumn = this.wallColumn.computeIfAbsent(Pair.of((int) entity.posX, (int) entity.posZ), pair -> Pair.of(now, Pair.of(new ArrayList<>(), new HashSet<>())));
+				if (wallColumn.second.second.add(id)) {
+					wallColumn.second.first.add(position);
+				}
+			}
+		}
+
+	}
+
+	private boolean inDispenserRegion(Entity entity, long now) {
+		int cX = MathHelper.floor_double(entity.posX / 4.0D);
+		int cZ = MathHelper.floor_double(entity.posZ / 4.0D);
+		Position miniChunkPosition = new Position(cX, 0, cZ);
+		MiniChunk miniChunk = this.dispenserCache.computeIfAbsent(miniChunkPosition, pos -> new MiniChunk(cX, cZ));
+		Position cXP = new Position(cX + 1, 0, cZ);
+		MiniChunk mc2 = this.dispenserCache.computeIfAbsent(cXP, pos -> new MiniChunk(cX + 1, cZ));
+		Position cXN = new Position(cX - 1, 0, cZ);
+		MiniChunk mc3 = this.dispenserCache.computeIfAbsent(cXN, pos -> new MiniChunk(cX - 1, cZ));
+		Position cZP = new Position(cX, 0, cZ + 1);
+		MiniChunk mc4 = this.dispenserCache.computeIfAbsent(cZP, pos -> new MiniChunk(cX, cZ + 1));
+		Position cZN = new Position(cX, 0, cZ - 1);
+		MiniChunk mc5 = this.dispenserCache.computeIfAbsent(cZN, pos -> new MiniChunk(cX, cZ - 1));
+
+		return miniChunk.containsDispensers(now) || mc2.containsDispensers(now) || mc3.containsDispensers(now) || mc4.containsDispensers(now) || mc5.containsDispensers(now);
+	}
+
+
+	private long now = System.currentTimeMillis();
+
+	@SubscribeEvent
 	public void onTick(TickEvent.ClientTickEvent event) {
 		this.cleanUp(this.TNTLines);
 		this.cleanUp(this.fallingBlockLines);
@@ -178,7 +217,7 @@ public class CannonToolsMod extends AbstractModule {
 		if (mc.theWorld == null) {
 			return;
 		}
-		long now = System.currentTimeMillis();
+		this.now = System.currentTimeMillis();
 		for (Entity entity : mc.theWorld.loadedEntityList) {
 			boolean isTNT = entity instanceof EntityTNTPrimed;
 			boolean isSand = entity instanceof EntityFallingBlock;
@@ -213,21 +252,9 @@ public class CannonToolsMod extends AbstractModule {
 			boolean inDispenserRegion = false;
 
 			if (checkInDispenserRegion) {
-				int cX = MathHelper.floor_double(entity.posX / 4.0D);
-				int cZ = MathHelper.floor_double(entity.posZ / 4.0D);
-				Position miniChunkPosition = new Position(cX, 0, cZ);
-				MiniChunk miniChunk = this.dispenserCache.computeIfAbsent(miniChunkPosition, pos -> new MiniChunk(cX, cZ));
-				Position cXP = new Position(cX + 1, 0, cZ);
-				MiniChunk mc2 = this.dispenserCache.computeIfAbsent(cXP, pos -> new MiniChunk(cX + 1, cZ));
-				Position cXN = new Position(cX - 1, 0, cZ);
-				MiniChunk mc3 = this.dispenserCache.computeIfAbsent(cXN, pos -> new MiniChunk(cX - 1, cZ));
-				Position cZP = new Position(cX, 0, cZ + 1);
-				MiniChunk mc4 = this.dispenserCache.computeIfAbsent(cZP, pos -> new MiniChunk(cX, cZ + 1));
-				Position cZN = new Position(cX, 0, cZ - 1);
-				MiniChunk mc5 = this.dispenserCache.computeIfAbsent(cZN, pos -> new MiniChunk(cX, cZ - 1));
-
-				inDispenserRegion = miniChunk.containsDispensers(now) || mc2.containsDispensers(now) || mc3.containsDispensers(now) || mc4.containsDispensers(now) || mc5.containsDispensers(now);
+				inDispenserRegion = inDispenserRegion(entity, now);
 			}
+
 
 			int id = entity.getEntityId();
 
@@ -367,8 +394,8 @@ public class CannonToolsMod extends AbstractModule {
 
 		int average = totalTNT / count;
 
-		for (int i = values.size() - 1; i > -1; i--) {
-			if (values.get(i).second.second.size() > average / 2) {
+		for (int i = 0; i < values.size(); ++i) {
+			if (values.get(i).second.second.size() > (average / 1.5D)) {
 				column = values.get(i).second;
 			}
 		}
@@ -377,7 +404,7 @@ public class CannonToolsMod extends AbstractModule {
 			return;
 		}
 
-		Position patchPosition = column.first.get(0);
+		Position patchPosition = column.first.get(column.first.size() - 1);
 
 		if (patchPosition.y == -1) {
 			return;
