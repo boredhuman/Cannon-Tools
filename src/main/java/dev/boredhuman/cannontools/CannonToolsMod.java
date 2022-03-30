@@ -161,8 +161,6 @@ public class CannonToolsMod extends AbstractModule {
         RenderingRegistry.registerEntityRenderingHandler(EntityTNTPrimed.class, new TNTRenderer(Minecraft.getMinecraft().getRenderManager()));
         MinecraftForge.EVENT_BUS.register(this);
     }
-
-
     @SubscribeEvent
     public void onEntityJoin(EntityJoinWorldEvent e) {
         if (!this.isEnabled().getValue() || !this.patchCrumbs.getValue()) {
@@ -182,7 +180,6 @@ public class CannonToolsMod extends AbstractModule {
 
     }
 
-
     private boolean inDispenserRegion(Entity entity, long now) {
         int cX = MathHelper.floor_double(entity.posX / 4.0D);
         int cZ = MathHelper.floor_double(entity.posZ / 4.0D);
@@ -201,7 +198,6 @@ public class CannonToolsMod extends AbstractModule {
     }
 
     private long now = System.currentTimeMillis();
-
     @SubscribeEvent
     public void onTick(TickEvent.ClientTickEvent event) {
         this.cleanUp(this.TNTLines);
@@ -219,7 +215,7 @@ public class CannonToolsMod extends AbstractModule {
         if (mc.theWorld == null) {
             return;
         }
-        this.now = System.currentTimeMillis();
+        this. now = System.currentTimeMillis();
         for (Entity entity : mc.theWorld.loadedEntityList) {
             boolean isTNT = entity instanceof EntityTNTPrimed;
             boolean isSand = entity instanceof EntityFallingBlock;
@@ -320,7 +316,7 @@ public class CannonToolsMod extends AbstractModule {
         List<Pair<Integer, Integer>> toRemove = new ArrayList<>();
 
         for (Map.Entry<Pair<Integer, Integer>, Pair<Long, Pair<List<Position>, Set<Integer>>>> mapEntry : this.wallColumn.entrySet()) {
-            if (now - mapEntry.getValue().first > (this.clearTimePatch.getValue() * 1000)) {
+            if (mapEntry.getValue().first + (this.clearTimePatch.getValue() * 1000) < now) {
                 toRemove.add(mapEntry.getKey());
             }
         }
@@ -395,12 +391,6 @@ public class CannonToolsMod extends AbstractModule {
 
         int average = totalTNT / count;
 
-//        for (int i = values.size() - 1; i > -1; i--) {
-//            if (values.get(i).second.second.size() > average / 2) {
-//                column = values.get(i).second;
-//            }
-//        }
-
         for (int i = 0; i < values.size(); ++i) {
             if (values.get(i).second.second.size() > (average / 1.5D)) {
                 column = values.get(i).second;
@@ -429,7 +419,7 @@ public class CannonToolsMod extends AbstractModule {
         event.addLineLineWidth(Pair.of(this.boxLineWidth.getValue(), this.renderHook), new BatchedLineRenderingEvent.Line(boxOutlines, this.patchColor.getBGRA()));
 
         int color = this.patchColor.getBGRA();
-        event.addBoxesColor(color, Arrays.asList(patchXBox, patchZBox), this.renderHook);
+        event.addBoxesColor(color, Arrays.asList(new Box[]{patchXBox, patchZBox}), this.renderHook);
     }
 
     public List<Pair<Position, Position>> makeOutline(Position position, double radius) {
