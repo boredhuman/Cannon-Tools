@@ -23,6 +23,7 @@ import net.minecraft.entity.item.EntityTNTPrimed;
 import net.minecraft.network.play.server.S27PacketExplosion;
 import net.minecraft.util.MathHelper;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.entity.EntityJoinWorldEvent;
 import net.minecraftforge.fml.client.registry.RenderingRegistry;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
@@ -167,7 +168,7 @@ public class CannonToolsMod extends AbstractModule {
 			return;
 		}
 		if (e.entity instanceof EntityTNTPrimed || e.entity instanceof EntityFallingBlock) {
-			if (!inDispenserRegion(e.entity, this.now)) {
+			if (!this.inDispenserRegion(e.entity, this.now)) {
 				Entity entity = e.entity;
 				int id = entity.getEntityId();
 				Position position = new Position(entity.posX, entity.posY + 0.49, entity.posZ);
@@ -252,7 +253,7 @@ public class CannonToolsMod extends AbstractModule {
 			boolean inDispenserRegion = false;
 
 			if (checkInDispenserRegion) {
-				inDispenserRegion = inDispenserRegion(entity, now);
+				inDispenserRegion = this.inDispenserRegion(entity, this.now);
 			}
 
 
@@ -281,12 +282,12 @@ public class CannonToolsMod extends AbstractModule {
 				boolean triangle = ((isTNT && this.tntTriangles.getValue()) || (isSand && this.sandTriangles.getValue())) && last != null;
 				if (triangle) {
 					listLinkedListPair.second.add(new Position(last.x, position.y, last.z));
-					listLinkedListPair.first.add(now);
+					listLinkedListPair.first.add(this.now);
 					listLinkedListPair.second.add(new Position(position.x, position.y, last.z));
-					listLinkedListPair.first.add(now);
+					listLinkedListPair.first.add(this.now);
 				}
 				listLinkedListPair.second.add(position);
-				listLinkedListPair.first.add(now);
+				listLinkedListPair.first.add(this.now);
 			}
 		}
 		this.liveTNT.clear();
@@ -346,13 +347,13 @@ public class CannonToolsMod extends AbstractModule {
 		}
 
 		if (this.explosionBox.getValue()) {
-			List<Pair<Position, Position>> lines = new ArrayList<>();
+			List<Box> explosionBoxes = new ArrayList<>();
 
 			for (Position position : this.tntPositionTime.keySet()) {
-				lines.addAll(this.makeOutline(position, this.explosionBoxRadius.getValue()));
+				explosionBoxes.add(this.makeBox(position, this.explosionBoxRadius.getValue()));
 			}
 
-			event.addLineLineWidth(Pair.of(this.boxLineWidth.getValue(), this.renderHook), new BatchedLineRenderingEvent.Line(lines, this.explosionBoxColor.getBGRA()));
+			event.addBoxOutlines(this.lineWidth.getValue(), this.renderHook, explosionBoxes, this.explosionBoxColor.getBGRA());
 		}
 
 		if (this.patchCrumbs.getValue()) {
@@ -415,18 +416,14 @@ public class CannonToolsMod extends AbstractModule {
 		Box patchXBox = new Box(patchPosition.x - 100, patchPosition.y - rad, patchPosition.z - rad, patchPosition.x + 100, patchPosition.y + rad, patchPosition.z + rad);
 		Box patchZBox = new Box(patchPosition.x - rad, patchPosition.y - rad, patchPosition.z - 100, patchPosition.x + rad, patchPosition.y + rad, patchPosition.z + 100);
 
-		List<Pair<Position, Position>> boxOutlines = new ArrayList<>();
-		boxOutlines.addAll(this.makeOutline(patchXBox.minX, patchXBox.minY, patchXBox.minZ, patchXBox.maxX, patchXBox.maxY, patchXBox.maxZ));
-		boxOutlines.addAll(this.makeOutline(patchZBox.minX, patchZBox.minY, patchZBox.minZ, patchZBox.maxX, patchZBox.maxY, patchZBox.maxZ));
+		List<Box> boxOutlines = new ArrayList<>();
+		boxOutlines.add(patchXBox);
+		boxOutlines.add(patchZBox);
 
-		event.addLineLineWidth(Pair.of(this.boxLineWidth.getValue(), this.renderHook), new BatchedLineRenderingEvent.Line(boxOutlines, this.patchColor.getBGRA()));
-
-		int color = this.patchColor.getBGRA();
-		event.addBoxesColor(color, Arrays.asList(new Box[]{patchXBox, patchZBox}), this.renderHook);
+		event.addBoxOutlines(this.lineWidth.getValue(), this.renderHook, boxOutlines, this.patchColor.getBGRA());
 	}
 
-	public List<Pair<Position, Position>> makeOutline(Position position, double radius) {
-		List<Pair<Position, Position>> linesList = new ArrayList<>();
+	public Box makeBox(Position position, double radius) {
 		double minX = position.x - radius;
 		double minY = position.y - radius;
 		double minZ = position.z - radius;
@@ -434,35 +431,7 @@ public class CannonToolsMod extends AbstractModule {
 		double maxY = position.y + radius;
 		double maxZ = position.z + radius;
 
-		return this.makeOutline(minX, minY, minZ, maxX, maxY, maxZ);
-	}
-
-	public List<Pair<Position, Position>> makeOutline(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) {
-		List<Pair<Position, Position>> linesList = new ArrayList<>();
-		Position origin = new Position(minX, minY, minZ);
-		Position max = new Position(maxX, maxY, maxZ);
-		Position originX = new Position(maxX, minY, minZ);
-		Position originZ = new Position(minX, minY, maxZ);
-		Position originXZ = new Position(maxX, minY, maxZ);
-		Position maxx = new Position(minX, maxY, maxZ);
-		Position maxz = new Position(maxX, maxY, minZ);
-		Position maxxz = new Position(minX, maxY, minZ);
-		linesList.add(new Pair<>(origin, originX));
-		linesList.add(new Pair<>(origin, originZ));
-		linesList.add(new Pair<>(originX, originXZ));
-		linesList.add(new Pair<>(originZ, originXZ));
-
-		linesList.add(new Pair<>(max, maxx));
-		linesList.add(new Pair<>(max, maxz));
-		linesList.add(new Pair<>(maxx, maxxz));
-		linesList.add(new Pair<>(maxz, maxxz));
-
-		linesList.add(new Pair<>(origin, maxxz));
-		linesList.add(new Pair<>(originX, maxz));
-		linesList.add(new Pair<>(originZ, maxx));
-		linesList.add(new Pair<>(originXZ, max));
-
-		return linesList;
+		return new Box(minX, minY, minZ, maxX, maxY, maxZ);
 	}
 
 	public static CannonToolsMod getInstance() {
